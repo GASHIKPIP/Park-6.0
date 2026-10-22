@@ -1,0 +1,538 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Фотопрогулка по парку</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Golos+Text:wght@400;500;600;700&family=PT+Serif:wght@400;700&display=swap">
+<style>
+/* Фотопрогулка: цепочка панорам 360°, отрендеренных трассировкой лучей каждые ~14 м вдоль аллей.
+   Сцена во весь экран, поверх — та же приборная панель из тёмной хвои с матовым золотом, что и в 3D-прогулке. */
+:root {
+  --bg: #EEF0E9; --surface: #F8F8F3; --fg: #13241D; --muted: #55665C; --line: #CBD3C8; --accent: #1F5A44; --accent-fg: #FFFFFF; --gold: #9C7A36;
+  --scene: #0E1A16;
+  --hud: rgba(14, 36, 29, .84); --hud-solid: #0E241D; --hud-2: rgba(21, 52, 41, .92); --hud-fg: #F1EAD7; --hud-muted: #B4C3B0; --hud-line: rgba(209, 180, 110, .28); --hud-gold: #D1B46E; --hud-gold-fg: #13241D;
+  --head: 'Golos Text', 'Segoe UI', system-ui, sans-serif;
+  --display: 'PT Serif', Georgia, 'Times New Roman', serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --bg: #0E241D; --surface: #153429; --fg: #F1EAD7; --muted: #B4C3B0; --line: #355142; --accent: #D1B46E; --accent-fg: #13241D; --gold: #D1B46E; color-scheme: dark; } }
+:root[data-theme="dark"] { --bg: #0E241D; --surface: #153429; --fg: #F1EAD7; --muted: #B4C3B0; --line: #355142; --accent: #D1B46E; --accent-fg: #13241D; --gold: #D1B46E; color-scheme: dark; }
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; overflow: hidden; }
+body { background: var(--scene); color: var(--hud-fg); font: 14px/1.45 var(--head); -webkit-tap-highlight-color: transparent; }
+[hidden] { display: none !important; }
+button { font: inherit; color: inherit; cursor: pointer; }
+:focus-visible { outline: 2px solid var(--hud-gold); outline-offset: 2px; }
+#app { position: fixed; inset: 0; overflow: hidden; }
+#gl { position: absolute; inset: 0; width: 100%; height: 100%; display: block; cursor: grab; touch-action: none; }
+#gl.drag { cursor: grabbing; }
+#arrows { position: absolute; inset: 0; pointer-events: none; }
+.arw { position: absolute; width: 64px; height: 64px; margin: -32px 0 0 -32px; border-radius: 50%; border: 0; padding: 0; background: rgba(14, 36, 29, .55); box-shadow: 0 0 0 2px rgba(241, 234, 215, .75), 0 4px 14px rgba(0, 0, 0, .35); pointer-events: auto; display: flex; align-items: center; justify-content: center; transition: background .15s, transform .15s; }
+.arw:hover, .arw.fw { background: rgba(209, 180, 110, .92); }
+.arw:hover svg, .arw.fw svg { color: #13241D; }
+.arw svg { width: 30px; height: 30px; color: var(--hud-fg); }
+.arw.far { width: 46px; height: 46px; margin: -23px 0 0 -23px; }
+.arw.far svg { width: 22px; height: 22px; }
+.arw .lbl { position: absolute; top: 100%; left: 50%; transform: translateX(-50%); margin-top: 8px; white-space: nowrap; padding: 3px 10px; border-radius: 12px; background: var(--hud); border: 1px solid var(--hud-gold); font-size: 13px; color: var(--hud-fg); }
+
+/* верхняя панель */
+.top { position: absolute; top: 0; left: 0; right: 0; display: flex; align-items: center; gap: 10px; padding: calc(10px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) 10px max(12px, env(safe-area-inset-left, 0px)); pointer-events: none; background: linear-gradient(rgba(0, 0, 0, .38), transparent); }
+.top > * { pointer-events: auto; }
+.hbtn { text-decoration: none; display: inline-flex; align-items: center; gap: 6px; height: 36px; padding: 0 12px; border-radius: 18px; border: 1px solid var(--hud-line); background: var(--hud); color: var(--hud-fg); font-size: 13px; white-space: nowrap; }
+.hbtn:hover { border-color: var(--hud-gold); }
+.hbtn[aria-pressed="true"] { background: var(--hud-gold); color: var(--hud-gold-fg); border-color: var(--hud-gold); }
+.hbtn svg { width: 16px; height: 16px; flex: none; }
+.ibtn { width: 36px; padding: 0; justify-content: center; }
+.where { min-width: 0; display: flex; flex-direction: column; line-height: 1.15; text-shadow: 0 1px 3px rgba(0, 0, 0, .6); }
+.where b { font-family: var(--display); font-size: 17px; font-weight: 700; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.where span { font-size: 12px; color: var(--hud-muted); font-variant-numeric: tabular-nums; }
+.compass { flex: 1; display: flex; justify-content: center; min-width: 0; }
+.cstrip { position: relative; width: min(340px, 100%); height: 30px; border-radius: 15px; background: var(--hud); border: 1px solid var(--hud-line); overflow: hidden; }
+.cstrip i { position: absolute; top: 0; height: 100%; display: flex; align-items: center; transform: translateX(-50%); font-style: normal; font-size: 12px; color: var(--hud-muted); font-variant-numeric: tabular-nums; }
+.cstrip i.c { color: var(--hud-fg); font-weight: 700; }
+.cstrip i.n { color: var(--hud-gold); }
+.cstrip::after { content: ''; position: absolute; left: 50%; top: 3px; bottom: 3px; width: 2px; margin-left: -1px; background: var(--hud-gold); border-radius: 1px; }
+.tools { display: flex; gap: 6px; }
+
+/* мини-карта */
+#minibox { position: absolute; right: max(12px, env(safe-area-inset-right, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); padding: 6px; border-radius: 12px; background: var(--hud); border: 1px solid var(--hud-line); cursor: pointer; }
+#mini { display: block; width: 240px; height: 160px; border-radius: 7px; }
+
+/* карточка места */
+#card { position: absolute; left: max(12px, env(safe-area-inset-left, 0px)); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); width: min(380px, calc(100% - 24px)); border-radius: 12px; background: var(--hud); border: 1px solid var(--hud-line); padding: 10px 14px 12px; display: grid; gap: 6px; }
+#card .ey { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--hud-gold); }
+#card h2 { margin: 0; font-family: var(--display); font-size: 19px; line-height: 1.2; text-wrap: balance; }
+#card p { margin: 0; opacity: .92; font-size: 13.5px; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* полоса маршрута */
+#routebar { position: absolute; left: 0; right: 0; margin-inline: auto; width: fit-content; max-width: calc(100% - 24px); bottom: calc(12px + env(safe-area-inset-bottom, 0px)); display: flex; align-items: center; gap: 8px; padding: 6px 6px 6px 14px; border-radius: 22px; background: var(--hud); border: 1px solid var(--hud-gold); }
+#routebar .rt { min-width: 0; display: flex; flex-direction: column; line-height: 1.15; }
+#routebar .rt b { font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+#routebar .rt span { font-size: 11.5px; color: var(--hud-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+#routebar .prog { width: 90px; height: 4px; border-radius: 2px; background: rgba(255, 255, 255, .15); overflow: hidden; flex: none; }
+#routebar .prog i { display: block; height: 100%; width: 0; background: var(--hud-gold); }
+#hint { position: absolute; left: 50%; top: calc(64px + env(safe-area-inset-top, 0px)); transform: translateX(-50%); padding: 6px 14px; border-radius: 16px; background: var(--hud); border: 1px solid var(--hud-line); font-size: 13px; white-space: nowrap; transition: opacity .3s; pointer-events: none; }
+#load { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); padding: 8px 16px; border-radius: 16px; background: var(--hud); border: 1px solid var(--hud-line); font-size: 13px; pointer-events: none; }
+
+/* большая карта */
+#bigmap { position: absolute; inset: 0; background: rgba(6, 16, 12, .8); display: flex; align-items: center; justify-content: center; padding: calc(60px + env(safe-area-inset-top, 0px)) max(12px, env(safe-area-inset-right, 0px)) calc(12px + env(safe-area-inset-bottom, 0px)) max(12px, env(safe-area-inset-left, 0px)); }
+#bigmap .wrap { position: relative; display: grid; grid-template-columns: minmax(0, 1fr) 250px; gap: 12px; width: min(1220px, 100%); max-height: 100%; }
+#bigmap .mapc { position: relative; min-width: 0; border-radius: 12px; overflow: hidden; background: var(--hud-solid); border: 1px solid var(--hud-line); align-self: start; }
+#big { display: block; width: 100%; height: auto; cursor: crosshair; }
+#bigmap .list { min-width: 0; overflow: auto; max-height: min(680px, calc(100vh - 100px)); display: grid; gap: 4px; align-content: start; padding: 10px; border-radius: 12px; background: var(--hud); border: 1px solid var(--hud-line); }
+#bigmap .list h3 { margin: 2px 4px 6px; font-family: var(--display); font-size: 17px; }
+#bigmap .list button { text-align: left; padding: 6px 8px; border: 0; border-radius: 8px; background: transparent; font-size: 13px; }
+#bigmap .list button:hover { background: var(--hud-2); }
+#bigmap .note { position: absolute; left: 10px; bottom: 8px; font-size: 12px; color: var(--hud-fg); pointer-events: none; text-shadow: 0 1px 2px #000; }
+
+/* стартовый экран (по теме зрителя) */
+#start { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; padding: 16px; background: rgba(6, 16, 12, .35); }
+#start .box { width: min(780px, 100%); max-height: 100%; overflow: auto; background: var(--bg); color: var(--fg); border-radius: 16px; border: 1px solid var(--line); box-shadow: 0 20px 60px rgba(0, 0, 0, .45); padding: 22px 24px; display: grid; gap: 14px; }
+#start .ey { font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--gold); font-weight: 600; }
+#start h1 { margin: 0; font-family: var(--display); font-size: clamp(26px, 4vw, 34px); line-height: 1.1; text-wrap: balance; }
+#start p { margin: 0; color: var(--muted); max-width: 64ch; }
+#start .starts { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+#start .sbtn { text-align: left; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); color: var(--fg); display: grid; gap: 2px; }
+#start .sbtn b { font-size: 14px; }
+#start .sbtn span { font-size: 12px; color: var(--muted); }
+#start .sbtn em { font-style: normal; font-size: 12px; color: var(--gold); font-variant-numeric: tabular-nums; }
+#start .sbtn:hover { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+#start .keys { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; color: var(--muted); }
+#start .alt { font-size: 13px; color: var(--muted); }
+#start .alt a { color: var(--accent); }
+kbd { display: inline-block; min-width: 22px; padding: 1px 6px; border-radius: 5px; border: 1px solid var(--line); border-bottom-width: 2px; background: var(--surface); font: 600 12px/1.5 var(--head); text-align: center; color: var(--fg); }
+
+@media (max-width: 760px) {
+  .compass { display: none; }
+  .hbtn .tx { display: none; }
+  .hbtn { padding: 0 10px; }
+  #mini { width: 150px; height: 100px; }
+  #minibox { top: calc(56px + env(safe-area-inset-top, 0px)); bottom: auto; }
+  #card { bottom: calc(76px + env(safe-area-inset-bottom, 0px)); }
+  #card p { -webkit-line-clamp: 2; font-size: 12.5px; }
+  #bigmap .wrap { grid-template-columns: 1fr; }
+  #bigmap .list { max-height: 30vh; }
+  .arw { width: 54px; height: 54px; margin: -27px 0 0 -27px; }
+}
+@media (prefers-reduced-motion: reduce) { .arw, #hint { transition: none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <canvas id="gl" aria-label="Панорама 360°: потяните, чтобы осмотреться, нажмите на стрелку, чтобы пройти дальше" tabindex="0"></canvas>
+  <div id="arrows"></div>
+  <div class="top">
+    <button class="hbtn ibtn" id="bClose" type="button" aria-label="Закрыть прогулку" title="Закрыть" hidden><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 3l10 10M13 3L3 13"/></svg></button>
+    <div class="where"><b id="zone">Фотопрогулка</b><span id="coord">панорамы 360° каждые 18 м</span></div>
+    <div class="compass"><div class="cstrip" id="cstrip"></div></div>
+    <div class="tools">
+      <button class="hbtn" id="bRoutes" type="button" aria-label="Маршруты"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M3 13c3-1 2-5 5-6s3-4 5-4"/><circle cx="3" cy="13" r="1.6"/><circle cx="13" cy="3" r="1.6"/></svg><span class="tx">Маршруты</span></button>
+      <button class="hbtn" id="bMap" type="button" aria-label="Карта"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M1.5 3.5l4-1.5 5 2 4-1.5v10l-4 1.5-5-2-4 1.5z M5.5 2v10 M10.5 4v10"/></svg><span class="tx">Карта</span></button>
+      <a class="hbtn" id="b3d" href="walk.html" title="Свободная прогулка в живой 3D-модели"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M8 1.5l6 3.2v6.6l-6 3.2-6-3.2V4.7z M2 4.7l6 3.3 6-3.3 M8 8v6.5"/></svg><span class="tx">3D-прогулка</span></a>
+    </div>
+  </div>
+  <div id="hint" style="opacity:0"></div>
+  <div id="load" hidden>Загружаю панораму…</div>
+  <div id="card" hidden><div class="ey" id="cardEy">Рядом</div><h2 id="cardT"></h2><p id="cardP"></p></div>
+  <div id="routebar" hidden>
+    <div class="rt"><b id="rtT"></b><span id="rtS"></span></div>
+    <div class="prog"><i id="rtP"></i></div>
+    <button class="hbtn ibtn" id="rtPlay" type="button" aria-label="Пауза"></button>
+    <button class="hbtn ibtn" id="rtStop" type="button" aria-label="Закончить маршрут"><svg viewBox="0 0 16 16" fill="currentColor"><rect x="3.5" y="3.5" width="9" height="9" rx="1.5"/></svg></button>
+  </div>
+  <div id="minibox" title="Открыть карту"><canvas id="mini" width="480" height="320"></canvas></div>
+  <div id="bigmap" hidden>
+    <div class="wrap">
+      <div class="mapc"><canvas id="big"></canvas><div class="note">Нажмите на точку, чтобы перенестись туда</div></div>
+      <div class="list" id="bigList"></div>
+    </div>
+  </div>
+  <div id="start">
+    <div class="box">
+      <div class="ey">Фотопрогулка · трассировка лучей</div>
+      <h1>Пройтись по парку по панорамам</h1>
+      <p>Каждые 18 метров вдоль аллей снята панорама 360° — тем же рендером, что и большие панорамы книги: настоящее небо, тени, отражения в воде. Стрелки на дорожке ведут к соседним точкам, маршруты проходят сами и останавливаются у мест.</p>
+      <div class="starts" id="starts"></div>
+      <div class="keys"><span><kbd>↑</kbd><kbd>W</kbd> вперёд</span><span><kbd>↓</kbd><kbd>S</kbd> назад</span><span><kbd>←</kbd><kbd>→</kbd> повернуться</span><span>мышь или палец — осмотреться</span><span><kbd>Пробел</kbd> пауза маршрута</span><span><kbd>M</kbd> карта</span></div>
+      <div class="alt">Хотите ходить где угодно, а не только по аллеям? <a href="walk.html">Свободная прогулка в живой 3D-модели</a>.</div>
+    </div>
+  </div>
+</div>
+<script>
+'use strict';
+const $ = (s) => document.querySelector(s);
+const PI = Math.PI, TAU = 2 * PI, D2R = PI / 180;
+const wrapA = (a) => { while (a > PI) a -= TAU; while (a < -PI) a += TAU; return a; };
+const clamp = (x, a, b) => Math.max(a, Math.min(b, x));
+const ease = (t) => t < .5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+let EMBED = false; try { EMBED = window.parent !== window && !!window.parent.__walkHost; } catch (e) { EMBED = false; }
+const IMG_DIR = 'img/walk/';
+const EYE = 1.65;
+
+let W = null, N = [], byId = {}, have = new Set();
+const V = { yaw: 0, pitch: -0.04, fov: 96 };          // yaw: compass bearing of the view (radians); fov: horizontal, degrees
+let cur = -1, busy = false, tour = null, paused = false, hostPaused = false;
+
+/* ------------------------------------------------------------------ WebGL: two equirect layers with a cross-fade */
+const cv = $('#gl');
+const gl = cv.getContext('webgl', { antialias: false, alpha: false, preserveDrawingBuffer: false });
+const VS = 'attribute vec2 p; varying vec2 q; void main(){ q = p; gl_Position = vec4(p, 0.0, 1.0); }';
+const FS = `precision highp float; varying vec2 q;
+uniform sampler2D tA, tB; uniform float mixv, asp, sharp;
+uniform vec3 cA, cB;     // yaw relative to the pano heading, pitch, tan(fov/2)
+vec4 look(sampler2D t, vec3 c) {
+  vec3 d = normalize(vec3(q.x * c.z * asp, q.y * c.z, 1.0));
+  float cp = cos(c.y), sp = sin(c.y); d = vec3(d.x, d.y * cp + d.z * sp, -d.y * sp + d.z * cp);
+  float cy = cos(c.x), sy = sin(c.x); d = vec3(d.x * cy + d.z * sy, d.y, -d.x * sy + d.z * cy);
+  float u = fract(0.5 + atan(d.x, d.z) / 6.2831853); float v = 0.5 - asin(clamp(d.y, -1.0, 1.0)) / 3.1415927;
+  vec2 uv = vec2(u, v), dx = vec2(1.0 / 3072.0, 0.0), dy = vec2(0.0, 1.0 / 1536.0);
+  vec3 m = texture2D(t, uv).rgb;
+  vec3 n = texture2D(t, uv + dx).rgb + texture2D(t, uv - dx).rgb + texture2D(t, uv + dy).rgb + texture2D(t, uv - dy).rgb;
+  return vec4(clamp(m + sharp * (m * 4.0 - n), 0.0, 1.0), 1.0);   // a light unsharp mask: the panorama is magnified about 2x on screen
+}
+void main(){ vec4 a = look(tA, cA); if (mixv <= 0.0) { gl_FragColor = a; return; } gl_FragColor = mix(a, look(tB, cB), mixv); }`;
+let prog = null, uni = {}, texA = null, texB = null;
+function glInit() {
+  if (!gl) return false;
+  const sh = (t, s) => { const o = gl.createShader(t); gl.shaderSource(o, s); gl.compileShader(o); if (!gl.getShaderParameter(o, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(o)); return o; };
+  prog = gl.createProgram(); gl.attachShader(prog, sh(gl.VERTEX_SHADER, VS)); gl.attachShader(prog, sh(gl.FRAGMENT_SHADER, FS)); gl.linkProgram(prog); gl.useProgram(prog);
+  const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
+  const loc = gl.getAttribLocation(prog, 'p'); gl.enableVertexAttribArray(loc); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  for (const n of ['tA', 'tB', 'mixv', 'asp', 'cA', 'cB', 'sharp']) uni[n] = gl.getUniformLocation(prog, n);
+  gl.uniform1i(uni.tA, 0); gl.uniform1i(uni.tB, 1);
+  texA = mkTex(); texB = mkTex();
+  return true;
+}
+function mkTex() { const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, 1, 1, 0, gl.RGB, gl.UNSIGNED_BYTE, new Uint8Array([14, 26, 22]));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE); gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE); return { t, node: -1 }; }
+function upload(T, img, node) { gl.bindTexture(gl.TEXTURE_2D, T.t); gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, img); T.node = node; }
+
+let dpr = 1, CW = 1, CH = 1;
+function resize() { dpr = Math.min(2, window.devicePixelRatio || 1); CW = cv.clientWidth; CH = cv.clientHeight; cv.width = Math.round(CW * dpr); cv.height = Math.round(CH * dpr); dirty = true; }
+addEventListener('resize', resize);
+const vfov = () => { const h = V.fov * D2R, a = CW / CH; return a >= 1 ? 2 * Math.atan(Math.tan(h / 2) / a) : Math.min(2 * Math.atan(Math.tan(h / 2) * 0.95), 110 * D2R); };   // portrait: the same angle upright
+let dirty = true, trans = null;
+function draw() {
+  if (!gl) return;
+  gl.viewport(0, 0, cv.width, cv.height);
+  const th = Math.tan(vfov() / 2), asp = CW / CH;
+  gl.uniform1f(uni.asp, asp); gl.uniform1f(uni.sharp, trans ? 0.0 : 0.55);
+  gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texA.t); gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texB.t);
+  const hA = texA.node >= 0 ? N[texA.node].hc : 0, hB = texB.node >= 0 ? N[texB.node].hc : 0;
+  if (trans) {
+    const t = trans.k, e = ease(t);
+    // the old panorama pushes in toward the next point, the new one settles from a slight zoom: a step forward
+    const thA = th * (1 - 0.42 * e), thB = th * (0.72 + 0.28 * e);
+    gl.uniform3f(uni.cA, V.yaw - hA, V.pitch, thA); gl.uniform3f(uni.cB, V.yaw - hB, V.pitch, thB);
+    gl.uniform1f(uni.mixv, clamp((t - 0.15) / 0.7, 0, 1));
+  } else { gl.uniform3f(uni.cA, V.yaw - hA, V.pitch, th); gl.uniform1f(uni.mixv, 0); }
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+}
+
+/* ------------------------------------------------------------------ images */
+const cache = new Map();
+function loadImg(i) {
+  if (cache.has(i)) return cache.get(i);
+  const p = new Promise((res, rej) => { const im = new Image(); im.decoding = 'async'; im.onload = () => res(im); im.onerror = rej; im.src = N[i].img || (IMG_DIR + N[i].id + '.jpg'); });
+  cache.set(i, p); p.catch(() => cache.delete(i));
+  if (cache.size > 14) { for (const k of cache.keys()) { if (k !== i && k !== cur && !nbs(cur).includes(k)) { cache.delete(k); break; } } }
+  return p;
+}
+function prefetch(i) { for (const j of nbs(i)) loadImg(j); if (tour) { const k = tour.k; for (let d = 1; d <= 2; d++) { const j = tour.seq[k + d]; if (j != null) loadImg(j); } } }
+
+/* ------------------------------------------------------------------ graph */
+const bearing = (a, b) => Math.atan2(N[b].x - N[a].x, -(N[b].y - N[a].y));        // compass, plan y points south
+const dist = (a, b) => Math.hypot(N[b].x - N[a].x, N[b].y - N[a].y);
+const nbCache = new Map();
+function nbs(i) {             // neighbours that have a panorama, stepping over any that are missing
+  if (i < 0) return [];
+  if (nbCache.has(i)) return nbCache.get(i);
+  const out = [], seen = new Set([i]); let front = [i];
+  for (let depth = 0; depth < 4 && front.length; depth++) {
+    const nx = [];
+    for (const u of front) for (const v of N[u].nb) { if (seen.has(v)) continue; seen.add(v); if (have.has(v)) out.push(v); else nx.push(v); }
+    front = nx;
+  }
+  nbCache.set(i, out); return out;
+}
+function nearestNode(x, y) { let b = -1, bd = 1e9; for (const i of have) { const d = Math.hypot(N[i].x - x, N[i].y - y); if (d < bd) { bd = d; b = i; } } return b; }
+
+/* ------------------------------------------------------------------ moving */
+function go(to, opts) {
+  opts = opts || {};
+  if (busy || to < 0 || to === cur) return Promise.resolve();
+  busy = true; const from = cur;
+  const show = setTimeout(() => { $('#load').hidden = false; }, 350);
+  return loadImg(to).then((img) => {
+    clearTimeout(show); $('#load').hidden = true;
+    if (from < 0 || opts.jump) {
+      upload(texA, img, to); cur = to; if (opts.yaw != null) V.yaw = opts.yaw; if (N[to].pitch != null) V.pitch = N[to].pitch; arrive(); busy = false; return;
+    }
+    upload(texB, img, to);
+    const y0 = V.yaw, y1 = opts.yaw != null ? opts.yaw : (N[to].img ? N[to].hc : bearing(from, to)), p0 = V.pitch, p1 = N[to].pitch != null ? N[to].pitch : -0.04;
+    const T0 = performance.now(), dur = opts.dur || (matchMedia('(prefers-reduced-motion: reduce)').matches ? 250 : 900);
+    return new Promise((res) => {
+      trans = { k: 0 };
+      const step = (now) => {
+        const k = clamp((now - T0) / dur, 0, 1); trans.k = k;
+        const e = ease(Math.min(1, k * 1.6));
+        V.yaw = y0 + wrapA(y1 - y0) * e; V.pitch = p0 + (p1 - p0) * e;
+        dirty = true;
+        if (k < 1) { requestAnimationFrame(step); return; }
+        const t = texA; texA = texB; texB = t; trans = null; cur = to; dirty = true; arrive(); busy = false; res();
+      };
+      requestAnimationFrame(step);
+    });
+  }).catch(() => { clearTimeout(show); $('#load').hidden = true; busy = false; hint('Панорама не загрузилась'); });
+}
+function arrive() {
+  arrows(); prefetch(cur); drawMini(); updateWhere();
+  try { history.replaceState(null, '', '#' + N[cur].id); } catch (e) { }
+}
+function forward(dir) {        // dir 1 = the way you look, -1 = behind you
+  if (cur < 0) return;
+  let best = -1, bd = 1e9;
+  for (const j of nbs(cur)) { const a = Math.abs(wrapA(bearing(cur, j) - V.yaw - (dir < 0 ? PI : 0))); if (a < bd) { bd = a; best = j; } }
+  if (best >= 0 && bd < 1.2) { stopTour(); go(best, { yaw: dir < 0 ? bearing(cur, best) : undefined }); }
+  else hint(dir > 0 ? 'Впереди нет точки — повернитесь к стрелке' : 'Позади нет точки');
+}
+
+/* ------------------------------------------------------------------ arrows on the path */
+function project(b, e) {     // compass bearing, elevation → screen px (css), or null
+  const rel = b - V.yaw, ce = Math.cos(e);
+  const d = [Math.sin(rel) * ce, Math.sin(e), Math.cos(rel) * ce];
+  const cp = Math.cos(V.pitch), sp = Math.sin(V.pitch);
+  const y = d[1] * cp - d[2] * sp, z = d[1] * sp + d[2] * cp;
+  if (z < 0.08) return null;
+  const f = (CH / 2) / Math.tan(vfov() / 2);
+  return [CW / 2 + d[0] / z * f, CH / 2 - y / z * f];
+}
+const ARW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 15l7-7 7 7"/></svg>';
+let arrowEls = [];
+function arrows() {
+  const box = $('#arrows'); box.innerHTML = ''; arrowEls = [];
+  if (cur < 0) return;
+  for (const j of nbs(cur)) {
+    const b = document.createElement('button'); b.type = 'button'; b.className = 'arw'; const lab = N[j].path === 'tower' ? N[cur].up : (N[cur].path === 'tower' ? N[cur].label : '');
+    b.innerHTML = ARW + (lab ? '<span class="lbl">' + lab + '</span>' : '');
+    const dd = dist(cur, j); b.setAttribute('aria-label', lab || ('Пройти ' + Math.round(dd) + ' м')); if (lab) b.classList.add('sp');
+    b.addEventListener('click', (ev) => { ev.stopPropagation(); stopTour(); go(j); });
+    box.appendChild(b); arrowEls.push({ el: b, j, b: bearing(cur, j), d: dd });
+  }
+  placeArrows();
+}
+function placeArrows() {
+  let fw = null, fa = 0.5;
+  for (const a of arrowEls) {
+    const g = Math.min(a.d, 9), e = a.el.classList.contains('sp') ? -0.2 : -Math.atan2(EYE, g);
+    const p = project(a.b, e);
+    if (!p || p[1] > CH - 20 || p[0] < -40 || p[0] > CW + 40) { a.el.hidden = true; continue; }
+    a.el.hidden = false; a.el.style.left = p[0] + 'px'; a.el.style.top = p[1] + 'px';
+    // the chevron points along the path on screen
+    const q = a.el.classList.contains('sp') ? null : project(a.b, -Math.atan2(EYE, g + 3));
+    const ang = q ? Math.atan2(q[0] - p[0], -(q[1] - p[1])) : 0;
+    a.el.querySelector('svg').style.transform = `rotate(${ang}rad)`;
+    a.el.classList.toggle('far', a.d > 22);
+    const off = Math.abs(wrapA(a.b - V.yaw)); a.el.classList.remove('fw'); if (off < fa) { fa = off; fw = a; }
+  }
+  if (fw) fw.el.classList.add('fw');
+}
+
+/* ------------------------------------------------------------------ look around */
+let drag = null;
+cv.addEventListener('pointerdown', (e) => { cv.setPointerCapture(e.pointerId); drag = { x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t: performance.now() }; cv.classList.add('drag'); });
+cv.addEventListener('pointermove', (e) => {
+  if (!drag) return;
+  const k = 2 * Math.tan(vfov() / 2) / CH;
+  V.yaw = wrapA(V.yaw - (e.clientX - drag.x) * k); V.pitch = clamp(V.pitch + (e.clientY - drag.y) * k, -1.35, 1.35);
+  drag.x = e.clientX; drag.y = e.clientY; dirty = true; if (tour && !paused) { paused = true; updateRouteBar(); }
+});
+cv.addEventListener('pointerup', (e) => {
+  cv.classList.remove('drag'); if (!drag) return;
+  const moved = Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0), quick = performance.now() - drag.t < 350; drag = null;
+  if (moved < 6 && quick) clickGround(e.clientX, e.clientY);
+});
+cv.addEventListener('pointercancel', () => { drag = null; cv.classList.remove('drag'); });
+cv.addEventListener('wheel', (e) => { e.preventDefault(); V.fov = clamp(V.fov + Math.sign(e.deltaY) * 5, 40, 115); dirty = true; }, { passive: false });
+function clickGround(sx, sy) {   // a click below the horizon walks toward the nearest point in that direction
+  if (cur < 0) return;
+  const r = cv.getBoundingClientRect(); const f = (CH / 2) / Math.tan(vfov() / 2);
+  const x = (sx - r.left - CW / 2) / f, y = -(sy - r.top - CH / 2) / f;
+  let d = [x, y, 1]; const cp = Math.cos(V.pitch), sp = Math.sin(V.pitch);
+  d = [d[0], d[1] * cp + d[2] * sp, -d[1] * sp + d[2] * cp];
+  if (d[1] > -0.02) return;
+  const b = V.yaw + Math.atan2(d[0], d[2]);
+  let best = -1, bd = 0.6; for (const j of nbs(cur)) { const a = Math.abs(wrapA(bearing(cur, j) - b)); if (a < bd) { bd = a; best = j; } }
+  if (best >= 0) { stopTour(); go(best); }
+}
+addEventListener('keydown', (e) => {
+  if (e.target.closest && e.target.closest('input,textarea')) return;
+  const k = e.key;
+  if (!$('#start').hidden) { if (k === 'Enter') { startFree(); e.preventDefault(); } return; }
+  if (k === 'Escape') { if (!$('#bigmap').hidden) { openBig(false); return; } if (EMBED) { parent.postMessage({ type: 'walk-close' }, '*'); } return; }
+  if (k === 'ArrowUp' || k === 'w' || k === 'W' || k === 'ц' || k === 'Ц') { forward(1); e.preventDefault(); }
+  else if (k === 'ArrowDown' || k === 's' || k === 'S' || k === 'ы' || k === 'Ы') { forward(-1); e.preventDefault(); }
+  else if (k === 'ArrowLeft' || k === 'a' || k === 'A' || k === 'ф' || k === 'Ф') { turning = -1; e.preventDefault(); }
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D' || k === 'в' || k === 'В') { turning = 1; e.preventDefault(); }
+  else if (k === ' ') { if (tour) { paused = !paused; updateRouteBar(); } e.preventDefault(); }
+  else if (k === 'm' || k === 'M' || k === 'ь' || k === 'Ь') openBig($('#bigmap').hidden);
+  else if (k === '+' || k === '=') { V.fov = clamp(V.fov - 6, 40, 115); dirty = true; }
+  else if (k === '-') { V.fov = clamp(V.fov + 6, 40, 115); dirty = true; }
+});
+let turning = 0;
+addEventListener('keyup', (e) => { if (['ArrowLeft', 'ArrowRight', 'a', 'A', 'd', 'D', 'ф', 'Ф', 'в', 'В'].includes(e.key)) turning = 0; });
+
+/* ------------------------------------------------------------------ places, card, compass */
+function nearPlace(i, r) { let best = null, bd = r || 32; for (const p of W.places) { const d = Math.hypot(p.x - N[i].x, p.y - N[i].y); if (d < bd) { bd = d; best = p; } } return best; }
+function showCard(p, ey) { const c = $('#card'); if (!p) { c.hidden = true; return; } $('#cardEy').textContent = ey || 'Рядом'; $('#cardT').textContent = p.t; $('#cardP').textContent = p.text || ''; c.hidden = false; }
+function updateWhere() {
+  const p = nearPlace(cur, 40);
+  $('#zone').textContent = p ? p.t : 'Аллеи парка';
+  if (!tour) showCard(nearPlace(cur, 26));
+}
+const DIRS = [[0, 'С'], [45, 'СВ'], [90, 'В'], [135, 'ЮВ'], [180, 'Ю'], [225, 'ЮЗ'], [270, 'З'], [315, 'СЗ']];
+function drawCompass() {
+  const s = $('#cstrip'), w = s.clientWidth || 300, deg = ((V.yaw / D2R) % 360 + 360) % 360; let h = '';
+  for (let a = 0; a < 360; a += 15) {
+    let d = a - deg; while (d > 180) d -= 360; while (d < -180) d += 360; if (Math.abs(d) > 70) continue;
+    const L = DIRS.find(q => q[0] === a); const x = w / 2 + d / 70 * (w / 2);
+    h += `<i class="${L ? (a === 0 ? 'n' : '') : ''}" style="left:${x.toFixed(1)}px">${L ? L[1] : '·'}</i>`;
+  }
+  s.innerHTML = h; $('#coord').textContent = Math.round(deg) + '° · точка ' + (cur >= 0 ? (cur + 1) : '–') + ' из ' + N.length;
+}
+let hintT = 0; function hint(t) { const h = $('#hint'); h.textContent = t; h.style.opacity = 1; clearTimeout(hintT); hintT = setTimeout(() => { h.style.opacity = 0; }, 2400); }
+
+/* ------------------------------------------------------------------ maps */
+let mapImg = null;
+function m2p(x, y, s, ox, oy) { return [(x - W.map.x0) * W.map.ppm * s - ox, (y - W.map.y0) * W.map.ppm * s - oy]; }
+function drawMini() {
+  if (!mapImg || cur < 0) return;
+  const c = $('#mini'), cx = c.getContext('2d'), w = c.width, h = c.height, s = 1.1, n = N[cur];
+  const [px, py] = m2p(n.x, n.y, s, 0, 0); const ox = px - w / 2, oy = py - h / 2;
+  cx.fillStyle = '#E8EDE2'; cx.fillRect(0, 0, w, h);
+  cx.drawImage(mapImg, -ox, -oy, mapImg.width * s, mapImg.height * s);
+  if (tour) { cx.strokeStyle = 'rgba(209,180,110,.95)'; cx.lineWidth = 4; cx.beginPath(); tour.seq.forEach((i, k) => { const q = m2p(N[i].x, N[i].y, s, ox, oy); k ? cx.lineTo(q[0], q[1]) : cx.moveTo(q[0], q[1]); }); cx.stroke(); }
+  for (const i of have) { const q = m2p(N[i].x, N[i].y, s, ox, oy); if (q[0] < -5 || q[1] < -5 || q[0] > w + 5 || q[1] > h + 5) continue; cx.fillStyle = '#1F5A44'; cx.beginPath(); cx.arc(q[0], q[1], 3.2, 0, TAU); cx.fill(); }
+  // view cone
+  const half = vfov() * (CW / CH) / 2;
+  cx.fillStyle = 'rgba(194,65,12,.32)'; cx.beginPath(); cx.moveTo(w / 2, h / 2); cx.arc(w / 2, h / 2, 46, V.yaw - half - PI / 2, V.yaw + half - PI / 2); cx.closePath(); cx.fill();
+  cx.fillStyle = '#C2410C'; cx.strokeStyle = '#fff'; cx.lineWidth = 2.5; cx.beginPath(); cx.arc(w / 2, h / 2, 7, 0, TAU); cx.fill(); cx.stroke();
+}
+function openBig(on) {
+  const bm = $('#bigmap'); bm.hidden = !on; if (!on) { cv.focus(); return; }
+  const c = $('#big'); c.width = mapImg.width; c.height = mapImg.height; const cx = c.getContext('2d');
+  cx.drawImage(mapImg, 0, 0);
+  cx.strokeStyle = 'rgba(31,90,68,.9)'; cx.lineWidth = 2.5;
+  for (const i of have) for (const j of nbs(i)) if (j > i) { const a = m2p(N[i].x, N[i].y, 1, 0, 0), b = m2p(N[j].x, N[j].y, 1, 0, 0); cx.beginPath(); cx.moveTo(a[0], a[1]); cx.lineTo(b[0], b[1]); cx.stroke(); }
+  for (const i of have) { const q = m2p(N[i].x, N[i].y, 1, 0, 0); cx.fillStyle = i === cur ? '#C2410C' : '#D1B46E'; cx.strokeStyle = '#13241D'; cx.lineWidth = 1.5; cx.beginPath(); cx.arc(q[0], q[1], i === cur ? 8 : 5, 0, TAU); cx.fill(); cx.stroke(); }
+  const L = $('#bigList'); L.innerHTML = '<h3>Места</h3>';
+  for (const p of W.places) { const n = nearestNode(p.x, p.y); if (n < 0) continue; const b = document.createElement('button'); b.type = 'button'; b.textContent = p.t; b.addEventListener('click', () => { openBig(false); stopTour(); go(n, { jump: true, yaw: Math.atan2(p.x - N[n].x, -(p.y - N[n].y)) }); }); L.appendChild(b); }
+}
+$('#big').addEventListener('click', (e) => {
+  const r = e.currentTarget.getBoundingClientRect(), k = mapImg.width / r.width;
+  const x = (e.clientX - r.left) * k / W.map.ppm + W.map.x0, y = (e.clientY - r.top) * k / W.map.ppm + W.map.y0;
+  const n = nearestNode(x, y); if (n >= 0 && Math.hypot(N[n].x - x, N[n].y - y) < 25) { openBig(false); stopTour(); go(n, { jump: true }); }
+});
+$('#bigmap').addEventListener('click', (e) => { if (e.target === e.currentTarget) openBig(false); });
+$('#minibox').addEventListener('click', () => openBig(true));
+$('#bMap').addEventListener('click', () => openBig($('#bigmap').hidden));
+
+/* ------------------------------------------------------------------ guided tours */
+const ICON_PAUSE = '<svg viewBox="0 0 16 16" fill="currentColor"><rect x="3.5" y="3" width="3" height="10" rx="1"/><rect x="9.5" y="3" width="3" height="10" rx="1"/></svg>';
+const ICON_PLAY = '<svg viewBox="0 0 16 16" fill="currentColor"><path d="M4.5 2.8v10.4l8.5-5.2z"/></svg>';
+function routeSeq(r) { return r.seq.filter(i => have.has(i)); }
+function startTour(r) {
+  const seq = routeSeq(r); if (seq.length < 2) { hint('Маршрут ещё не готов'); return; }
+  const stops = new Map(); for (const s of r.stops) { let at = r.seq[s.at]; if (!have.has(at)) { const p = W.places.find(q => q.id === s.id); at = nearestNode(p.x, p.y); } if (!stops.has(at)) stops.set(at, []); if (!stops.get(at).includes(s.id)) stops.get(at).push(s.id); }
+  tour = { r, seq, k: 0, stops, wait: 0 }; paused = false; $('#start').hidden = true;
+  go(seq[0], { jump: true, yaw: bearing(seq[0], seq[1]) }).then(() => { tour && (tour.wait = performance.now() + 1200); });
+  updateRouteBar(); drawMini();
+}
+function stopTour() { if (!tour) return; tour = null; paused = false; updateRouteBar(); showCard(nearPlace(cur, 26)); drawMini(); }
+function updateRouteBar() {
+  const bar = $('#routebar'); if (!tour) { bar.hidden = true; return; }
+  bar.hidden = false; $('#rtT').textContent = 'Маршрут «' + tour.r.t + '»';
+  const left = Math.round((tour.seq.length - 1 - tour.k) * W.step);
+  $('#rtS').textContent = (paused ? 'пауза · ' : '') + (left > 0 ? 'осталось ' + left + ' м' : 'финиш');
+  $('#rtP').style.width = (tour.k / Math.max(1, tour.seq.length - 1) * 100).toFixed(1) + '%';
+  $('#rtPlay').innerHTML = paused ? ICON_PLAY : ICON_PAUSE; $('#rtPlay').setAttribute('aria-label', paused ? 'Продолжить' : 'Пауза');
+}
+$('#rtPlay').addEventListener('click', () => { paused = !paused; if (tour) tour.wait = 0; updateRouteBar(); });
+$('#rtStop').addEventListener('click', stopTour);
+function tourTick(now) {
+  if (!tour || paused || busy || hostPaused || now < tour.wait) return;
+  const t = tour;
+  if (t.k >= t.seq.length - 1) { const name = t.r.t; tour = null; updateRouteBar(); hint('Маршрут «' + name + '» пройден'); showCard(nearPlace(cur, 26)); return; }
+  const a = t.seq[t.k], b = t.seq[t.k + 1];
+  go(b, { yaw: bearing(a, b), dur: 1000 }).then(() => {
+    if (tour !== t) return;
+    t.k++; updateRouteBar();
+    const lst = t.stops.get(b), sid = lst && lst.length ? lst[0] : null;
+    const up = sid === 'tower' && N[b].up ? N.findIndex(n => n.path === 'tower') : -1;
+    if (up >= 0 && have.has(up) && t.seq[t.k + 1] !== up) { t.seq.splice(t.k + 1, 0, up, b); lst.shift(); t.stops.set(up, [sid]); t.wait = performance.now() + 600; return; }
+    if (sid) {
+      lst.shift(); const p = W.places.find(q => q.id === sid);
+      const want = Math.atan2(p.x - N[b].x, -(p.y - N[b].y)), y0 = V.yaw, T0 = performance.now();
+      if (Math.hypot(p.x - N[b].x, p.y - N[b].y) > 4 && N[b].path !== 'tower') { const turn = (now2) => { const k = clamp((now2 - T0) / 1100, 0, 1); V.yaw = y0 + wrapA(want - y0) * ease(k); dirty = true; if (k < 1 && tour === t) requestAnimationFrame(turn); }; requestAnimationFrame(turn); }
+      showCard(p, 'Остановка · маршрут «' + t.r.t + '»'); t.wait = performance.now() + 5200;
+    } else { t.wait = performance.now() + 450; if (!nearPlace(b, 22)) $('#card').hidden = true; }
+  });
+}
+
+/* ------------------------------------------------------------------ start */
+function startFree(at) {
+  $('#start').hidden = true;
+  const i = at != null ? at : (have.has(0) ? 0 : [...have][0]);
+  const nb = nbs(i); go(i, { jump: true, yaw: nb.length ? bearing(i, nb[0]) : 0 }).then(() => hint('Нажмите на стрелку или ↑, чтобы идти'));
+  cv.focus();
+}
+function buildStart() {
+  const box = $('#starts'); box.innerHTML = '';
+  const add = (t, s, em, fn) => { const b = document.createElement('button'); b.type = 'button'; b.className = 'sbtn'; b.innerHTML = `<b>${t}</b><span>${s}</span>${em ? `<em>${em}</em>` : ''}`; b.addEventListener('click', fn); box.appendChild(b); };
+  add('Свободно', 'От главного входа, куда захочется: стрелки на дорожке', '', () => startFree());
+  const D = { big: 'Вход, ресторан, башня, амфитеатр, галереи, детская зона, сказки, настил и пруды', letopis: 'Четыре тёплых павильона «Северной летописи»', tales: 'Ресторан, «Следы леса», «Ладья», сказочные фигуры', water: 'Настил, павильон у воды, каскад, восточный пруд' };
+  for (const r of W.routes) { const seq = routeSeq(r); if (seq.length < 2) continue; const min = Math.round(seq.length * 1.5 / 60 + r.stops.length * 5.5 / 60); add('Маршрут «' + r.t + '»', D[r.id] || '', (Math.round(r.len / 10) * 10).toLocaleString('ru-RU') + ' м · около ' + Math.max(2, min) + ' мин', () => startTour(r)); }
+}
+$('#bRoutes').addEventListener('click', () => { stopTour(); $('#start').hidden = false; });
+if (EMBED) { $('#bClose').hidden = false; $('#bClose').addEventListener('click', () => parent.postMessage({ type: 'walk-close' }, '*')); }
+addEventListener('message', (e) => {
+  const d = e.data || {};
+  if (d.type === 'walk-pause') hostPaused = true;
+  if (d.type === 'walk-resume') { hostPaused = false; dirty = true; }
+  if (d.type === 'walk-route') { const r = W && W.routes.find(q => q.id === d.id); if (r) startTour(r); }
+  if (d.type === 'walk-place') { const p = W && W.places.find(q => q.id === d.id); if (p) { $('#start').hidden = true; stopTour(); const n = nearestNode(p.x, p.y); go(n, { jump: true, yaw: Math.atan2(p.x - N[n].x, -(p.y - N[n].y)) }); } }
+});
+
+let lastT = performance.now();
+function loop(now) {
+  const dt = Math.min(0.05, (now - lastT) / 1000); lastT = now;
+  if (turning && !hostPaused) { V.yaw = wrapA(V.yaw + turning * dt * 1.4); dirty = true; }
+  tourTick(now);
+  if (CW !== cv.clientWidth || CH !== cv.clientHeight) resize();
+  if (dirty && !hostPaused) { draw(); placeArrows(); drawCompass(); if (!trans) drawMini(); dirty = false; }
+  requestAnimationFrame(loop);
+}
+
+async function boot() {
+  if (!glInit()) { $('#start .box').innerHTML = '<h1>Нужен WebGL</h1><p>Этот браузер не умеет показывать панорамы. Откройте книгу в Chrome, Safari, Firefox или Edge.</p>'; return; }
+  resize();
+  W = await (await fetch('walk_nodes.json')).json();
+  N = W.nodes; N.forEach((n, i) => { byId[n.id] = i; n.hc = (90 - n.head) * D2R; });     // pano heading as a compass bearing
+  have = new Set(W.ready || N.map((n, i) => i));
+  mapImg = new Image(); mapImg.src = W.map.src; mapImg.onload = () => drawMini();
+  buildStart();
+  const h = location.hash.slice(1); const tok = decodeURIComponent(h);
+  if (byId[tok] != null && have.has(byId[tok])) startFree(byId[tok]);
+  else if (W.routes.some(r => r.id === tok)) startTour(W.routes.find(r => r.id === tok));
+  else if (W.places.some(p => p.id === tok)) { const p = W.places.find(q => q.id === tok); const n = nearestNode(p.x, p.y); $('#start').hidden = true; go(n, { jump: true, yaw: Math.atan2(p.x - N[n].x, -(p.y - N[n].y)) }); }
+  else loadImg(have.has(0) ? 0 : [...have][0]).then((im) => { if (cur < 0) { upload(texA, im, have.has(0) ? 0 : [...have][0]); V.yaw = N[texA.node].hc + 0.4; dirty = true; } });
+  requestAnimationFrame(loop);
+}
+boot();
+</script>
+</body>
+</html>
